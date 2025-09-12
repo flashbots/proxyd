@@ -130,6 +130,11 @@ var (
 		Message:       "too many requests",
 		HTTPErrorCode: 429,
 	}
+	ErrFlashbotsSignature = &RPCErr{
+		Code:          JSONRPCErrorInternal - 25,
+		Message:       "invalid flashbots signature",
+		HTTPErrorCode: 403,
+	}
 
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
@@ -470,10 +475,12 @@ const proxydHealthzMethod = "proxyd_healthz"
 
 const ConsensusGetReceiptsMethod = "consensus_getReceipts"
 
-const ReceiptsTargetDebugGetRawReceipts = "debug_getRawReceipts"
-const ReceiptsTargetAlchemyGetTransactionReceipts = "alchemy_getTransactionReceipts"
-const ReceiptsTargetParityGetTransactionReceipts = "parity_getBlockReceipts"
-const ReceiptsTargetEthGetTransactionReceipts = "eth_getBlockReceipts"
+const (
+	ReceiptsTargetDebugGetRawReceipts           = "debug_getRawReceipts"
+	ReceiptsTargetAlchemyGetTransactionReceipts = "alchemy_getTransactionReceipts"
+	ReceiptsTargetParityGetTransactionReceipts  = "parity_getBlockReceipts"
+	ReceiptsTargetEthGetTransactionReceipts     = "eth_getBlockReceipts"
+)
 
 type ConsensusGetReceiptsResult struct {
 	Method string      `json:"method"`
@@ -609,14 +616,11 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"err", err,
 				"method", metricLabelMethod,
 				"attempt_count", i+1,
-				"max_attempts", b.maxRetries+1,
+				"max_retries", b.maxRetries+1,
 			)
 			timer.ObserveDuration()
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
-			// perform a backoff if there are more retries for this backend
-			if i < b.maxRetries {
-				sleepContext(ctx, calcBackoff(i))
-			}
+			sleepContext(ctx, calcBackoff(i))
 			continue
 		}
 		timer.ObserveDuration()
@@ -741,6 +745,15 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error creating backend request")
+	}
+
+	headersToForward := GetHeadersToForward(ctx)
+	if len(headersToForward) != 0 {
+		for k, v := range headersToForward {
+			for _, value := range v {
+				httpReq.Header.Add(k, value)
+			}
+		}
 	}
 
 	if b.authPassword != "" {
@@ -1684,7 +1697,6 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		ServedBy: "",
 		error:    ErrNoBackends,
 	}
-
 }
 
 func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*RPCRes {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -61,7 +62,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 	// redis read replica client
 	// if read endpoint is not set, use primary endpoint
-	var redisReadClient = redisClient
+	redisReadClient := redisClient
 	if config.Redis.ReadURL != "" {
 		if redisClient == nil {
 			return nil, nil, errors.New("must specify a Redis primary URL. only read endpoint is set")
@@ -141,10 +142,7 @@ func Start(config *Config) (*Server, func(), error) {
 			return nil, nil, fmt.Errorf("must define an RPC URL for backend %s", name)
 		}
 
-		if config.BackendOptions.ResponseTimeoutMilliseconds != 0 {
-			timeout := millisecondsToDuration(config.BackendOptions.ResponseTimeoutMilliseconds)
-			opts = append(opts, WithTimeout(timeout))
-		} else if config.BackendOptions.ResponseTimeoutSeconds != 0 {
+		if config.BackendOptions.ResponseTimeoutSeconds != 0 {
 			timeout := secondsToDuration(config.BackendOptions.ResponseTimeoutSeconds)
 			opts = append(opts, WithTimeout(timeout))
 		}
@@ -201,12 +199,6 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		if cfg.StripTrailingXFF {
 			opts = append(opts, WithStrippedTrailingXFF())
-		}
-		if cfg.ResponseTimeoutMilliseconds != 0 {
-			opts = append(opts, WithTimeout(millisecondsToDuration(cfg.ResponseTimeoutMilliseconds)))
-		}
-		if cfg.MaxRetries != nil {
-			opts = append(opts, WithMaxRetries(*cfg.MaxRetries))
 		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
 		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
@@ -362,7 +354,7 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	limiterFactory := func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
-		if config.RateLimit.UseRedis {
+		if config.RateLimit.UseRedis || config.HighPrioRateLimit.UseRedis {
 			limiter := NewRedisFrontendRateLimiter(redisClient, dur, max, prefix)
 
 			if config.Redis.FallbackToMemory {
@@ -406,6 +398,11 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
 	}
 
+	highPrioSigners := make(map[common.Address]bool, len(config.HighPrioSigners))
+	for _, s := range config.HighPrioSigners {
+		highPrioSigners[common.HexToAddress(s)] = true
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -418,6 +415,8 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.EnableXServedByHeader,
 		rpcCache,
 		config.RateLimit,
+		config.HighPrioRateLimit,
+		highPrioSigners,
 		config.SenderRateLimit,
 		config.InteropValidationConfig.RateLimit,
 		config.Server.EnableRequestLog,
@@ -426,6 +425,8 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
+		config.AllowedDynamicHeaders,
+		config.VerifyFlashbotsSignature,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -587,10 +588,6 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
-}
-
-func millisecondsToDuration(ms int) time.Duration {
-	return time.Duration(ms) * time.Millisecond
 }
 
 func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
