@@ -87,9 +87,7 @@ func (t *TOMLDuration) UnmarshalText(b []byte) error {
 }
 
 type BackendOptions struct {
-	// Deprecated: Use ResponseTimeoutMilliseconds instead. Note this field will be overridden if `ResponseTimeoutMilliseconds` is also set.
 	ResponseTimeoutSeconds      int          `toml:"response_timeout_seconds"`
-	ResponseTimeoutMilliseconds int          `toml:"response_timeout_milliseconds"`
 	MaxResponseSizeBytes        int64        `toml:"max_response_size_bytes"`
 	MaxRetries                  int          `toml:"max_retries"`
 	OutOfServiceSeconds         int          `toml:"out_of_service_seconds"`
@@ -114,9 +112,7 @@ type BackendConfig struct {
 
 	Weight int `toml:"weight"`
 
-	SkipIsSyncingCheck          bool `toml:"skip_is_syncing_check"`
-	ResponseTimeoutMilliseconds int  `toml:"response_timeout_milliseconds"`
-	MaxRetries                  *int `toml:"max_retries"`
+	SkipIsSyncingCheck bool `toml:"skip_is_syncing_check"`
 
 	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
 	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
@@ -131,7 +127,6 @@ type BackendsConfig map[string]*BackendConfig
 type RoutingStrategy string
 
 func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
-
 	// If Consensus Aware is Set and Routing RoutingStrategy is populated fail
 	if b.ConsensusAware && b.RoutingStrategy != "" {
 		log.Warn("consensus_aware is now deprecated, please use routing_strategy = consensus_aware")
@@ -216,22 +211,26 @@ type SenderRateLimitConfig struct {
 }
 
 type Config struct {
-	WSBackendGroup          string                  `toml:"ws_backend_group"`
-	Server                  ServerConfig            `toml:"server"`
-	Cache                   CacheConfig             `toml:"cache"`
-	Redis                   RedisConfig             `toml:"redis"`
-	Metrics                 MetricsConfig           `toml:"metrics"`
-	RateLimit               RateLimitConfig         `toml:"rate_limit"`
-	BackendOptions          BackendOptions          `toml:"backend"`
-	Backends                BackendsConfig          `toml:"backends"`
-	BatchConfig             BatchConfig             `toml:"batch"`
-	Authentication          map[string]string       `toml:"authentication"`
-	BackendGroups           BackendGroupsConfig     `toml:"backend_groups"`
-	RPCMethodMappings       map[string]string       `toml:"rpc_method_mappings"`
-	WSMethodWhitelist       []string                `toml:"ws_method_whitelist"`
-	WhitelistErrorMessage   string                  `toml:"whitelist_error_message"`
-	SenderRateLimit         SenderRateLimitConfig   `toml:"sender_rate_limit"`
-	InteropValidationConfig InteropValidationConfig `toml:"interop_validation"`
+	WSBackendGroup           string                  `toml:"ws_backend_group"`
+	Server                   ServerConfig            `toml:"server"`
+	Cache                    CacheConfig             `toml:"cache"`
+	Redis                    RedisConfig             `toml:"redis"`
+	Metrics                  MetricsConfig           `toml:"metrics"`
+	RateLimit                RateLimitConfig         `toml:"rate_limit"`
+	HighPrioRateLimit       RateLimitConfig         `toml:"high_prio_rate_limit"`
+	HighPrioSigners         []string                `toml:"high_prio_signers"`
+	BackendOptions           BackendOptions          `toml:"backend"`
+	Backends                 BackendsConfig          `toml:"backends"`
+	BatchConfig              BatchConfig             `toml:"batch"`
+	Authentication           map[string]string       `toml:"authentication"`
+	BackendGroups            BackendGroupsConfig     `toml:"backend_groups"`
+	RPCMethodMappings        map[string]string       `toml:"rpc_method_mappings"`
+	WSMethodWhitelist        []string                `toml:"ws_method_whitelist"`
+	AllowedDynamicHeaders    []string                `toml:"allowed_dynamic_headers"`
+	VerifyFlashbotsSignature bool                    `toml:"verify_flashbots_signature"`
+	WhitelistErrorMessage    string                  `toml:"whitelist_error_message"`
+	SenderRateLimit          SenderRateLimitConfig   `toml:"sender_rate_limit"`
+	InteropValidationConfig  InteropValidationConfig `toml:"interop_validation"`
 }
 
 type InteropValidationConfig struct {

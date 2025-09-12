@@ -17,11 +17,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/types/interoptypes"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -36,7 +38,9 @@ const (
 	ContextKeyXForwardedFor                         = "x_forwarded_for"
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
+	ContextKeyHeadersToForward                      = "headers_to_forward"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
+	FlashbotsAuthHeader                             = "X-Flashbots-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
 	MaxBatchRPCCallsHardLimit                       = 1000
 	cacheStatusHdr                                  = "X-Proxyd-Cache-Status"
@@ -55,37 +59,49 @@ const (
 	defaultInteropLoadBalancingUnhealthinessTimeout = 10 * time.Second
 )
 
-var emptyArrayResponse = json.RawMessage("[]")
+var (
+	emptyArrayResponse = json.RawMessage("[]")
+	nullAddress        = common.Address{}
+)
+
+var (
+	ErrNoSignature      = errors.New("no signature provided")
+	ErrInvalidSignature = errors.New("invalid signature provided")
+)
 
 type Server struct {
-	BackendGroups           map[string]*BackendGroup
-	wsBackendGroup          *BackendGroup
-	wsMethodWhitelist       *StringSet
-	rpcMethodMappings       map[string]string
-	maxBodySize             int64
-	enableRequestLog        bool
-	maxRequestBodyLogLen    int
-	authenticatedPaths      map[string]string
-	timeout                 time.Duration
-	maxUpstreamBatchSize    int
-	maxBatchSize            int
-	enableServedByHeader    bool
-	upgrader                *websocket.Upgrader
-	mainLim                 FrontendRateLimiter
-	overrideLims            map[string]FrontendRateLimiter
-	senderLim               FrontendRateLimiter
-	interopSenderLim        FrontendRateLimiter
-	allowedChainIds         []*big.Int
-	limExemptOrigins        []*regexp.Regexp
-	limExemptUserAgents     []*regexp.Regexp
-	globallyLimitedMethods  map[string]bool
-	rpcServer               *http.Server
-	wsServer                *http.Server
-	cache                   RPCCache
-	srvMu                   sync.Mutex
-	rateLimitHeader         string
-	interopValidatingConfig InteropValidationConfig
-	interopStrategy         InteropStrategy
+	BackendGroups            map[string]*BackendGroup
+	wsBackendGroup           *BackendGroup
+	wsMethodWhitelist        *StringSet
+	rpcMethodMappings        map[string]string
+	maxBodySize              int64
+	enableRequestLog         bool
+	maxRequestBodyLogLen     int
+	authenticatedPaths       map[string]string
+	timeout                  time.Duration
+	maxUpstreamBatchSize     int
+	maxBatchSize             int
+	enableServedByHeader     bool
+	upgrader                 *websocket.Upgrader
+	mainLim                  FrontendRateLimiter
+	highPrioSigners          map[common.Address]bool
+	overrideLims             map[string]FrontendRateLimiter
+	highPrioOverrideLims     map[string]FrontendRateLimiter
+	senderLim                FrontendRateLimiter
+	interopSenderLim         FrontendRateLimiter
+	allowedChainIds          []*big.Int
+	limExemptOrigins         []*regexp.Regexp
+	limExemptUserAgents      []*regexp.Regexp
+	globallyLimitedMethods   map[string]bool
+	rpcServer                *http.Server
+	wsServer                 *http.Server
+	cache                    RPCCache
+	srvMu                    sync.Mutex
+	rateLimitHeader          string
+	interopValidatingConfig  InteropValidationConfig
+	interopStrategy          InteropStrategy
+	allowedDynamicHeaders    []string
+	verifyFlashbotsSignature bool
 }
 
 type limiterFunc func(method string) bool
@@ -104,6 +120,8 @@ func NewServer(
 	enableServedByHeader bool,
 	cache RPCCache,
 	rateLimitConfig RateLimitConfig,
+	highPrioRateLimitConfig RateLimitConfig,
+	highPrioSingers map[common.Address]bool,
 	senderRateLimitConfig SenderRateLimitConfig,
 	interopSenderRateLimitConfig SenderRateLimitConfig,
 	enableRequestLog bool,
@@ -112,6 +130,8 @@ func NewServer(
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
+	allowedDynamicHeaders []string,
+	verifyFlashbotsSignature bool,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -161,6 +181,7 @@ func NewServer(
 	}
 
 	overrideLims := make(map[string]FrontendRateLimiter)
+	highPrioOverrideLims := make(map[string]FrontendRateLimiter)
 	globalMethodLims := make(map[string]bool)
 	for method, override := range rateLimitConfig.MethodOverrides {
 		overrideLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, method)
@@ -169,6 +190,15 @@ func NewServer(
 			globalMethodLims[method] = true
 		}
 	}
+
+	for method, override := range highPrioRateLimitConfig.MethodOverrides {
+		highPrioOverrideLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, method)
+
+		if override.Global {
+			globalMethodLims[method] = true
+		}
+	}
+
 	var senderLim FrontendRateLimiter
 	if senderRateLimitConfig.Enabled {
 		senderLim = limiterFactory(time.Duration(senderRateLimitConfig.Interval), senderRateLimitConfig.Limit, "senders")
@@ -201,17 +231,21 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                 mainLim,
-		overrideLims:            overrideLims,
-		globallyLimitedMethods:  globalMethodLims,
-		senderLim:               senderLim,
-		interopSenderLim:        interopSenderLim,
-		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:        limExemptOrigins,
-		limExemptUserAgents:     limExemptUserAgents,
-		rateLimitHeader:         rateLimitHeader,
-		interopValidatingConfig: interopValidatingConfig,
-		interopStrategy:         interopStrategy,
+		mainLim:                  mainLim,
+		highPrioSigners:          highPrioSingers,
+		overrideLims:             overrideLims,
+		highPrioOverrideLims:     highPrioOverrideLims,
+		globallyLimitedMethods:   globalMethodLims,
+		senderLim:                senderLim,
+		interopSenderLim:         interopSenderLim,
+		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:         limExemptOrigins,
+		limExemptUserAgents:      limExemptUserAgents,
+		rateLimitHeader:          rateLimitHeader,
+		interopValidatingConfig:  interopValidatingConfig,
+		interopStrategy:          interopStrategy,
+		allowedDynamicHeaders:    allowedDynamicHeaders,
+		verifyFlashbotsSignature: verifyFlashbotsSignature,
 	}, nil
 }
 
@@ -291,31 +325,6 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isLimited := func(method string) bool {
-		isGloballyLimitedMethod := s.isGlobalLimit(method)
-		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
-			return false
-		}
-
-		var lim FrontendRateLimiter
-		if method == "" {
-			lim = s.mainLim
-		} else {
-			lim = s.overrideLims[method]
-		}
-
-		if lim == nil {
-			return false
-		}
-
-		ok, err := lim.Take(ctx, xff)
-		if err != nil {
-			log.Warn("error taking rate limit", "err", err)
-			return true
-		}
-		return !ok
-	}
-
 	log.Debug(
 		"received RPC request",
 		"req_id", GetReqID(ctx),
@@ -338,6 +347,47 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RecordRequestPayloadSize(ctx, len(body))
+
+	flashbotsAuth := r.Header.Get(FlashbotsAuthHeader)
+	var signer common.Address
+	if flashbotsAuth != "" {
+		signer, err = VerifyFlashbotsAuth(flashbotsAuth, body)
+		if err != nil {
+			log.Error("error verifying flashbots auth", "err", err)
+			writeRPCError(ctx, w, nil, ErrFlashbotsSignature)
+			return
+		}
+	}
+
+	isLimited := func(method string) bool {
+		isGloballyLimitedMethod := s.isGlobalLimit(method)
+		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
+			return false
+		}
+
+		isHighPrio := s.highPrioSigners[signer]
+		var lim FrontendRateLimiter
+		if method == "" {
+			lim = s.mainLim
+		} else {
+			if isHighPrio {
+				lim = s.highPrioOverrideLims[method]
+			} else {
+				lim = s.overrideLims[method]
+			}
+		}
+
+		if lim == nil {
+			return false
+		}
+
+		ok, err := lim.Take(ctx, xff)
+		if err != nil {
+			log.Warn("error taking rate limit", "err", err)
+			return true
+		}
+		return !ok
+	}
 
 	if s.enableRequestLog {
 		log.Info("Raw RPC request",
@@ -641,7 +691,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				log.Error(
 					"error forwarding RPC batch",
 					"batch_size", len(elems),
-					"backend_group", group.backendGroup,
+					"backend_group", group,
 					"req_id", GetReqID(ctx),
 					"err", err,
 				)
@@ -743,6 +793,25 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		}
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
+	}
+
+	bts_, _ := json.Marshal(s.allowedDynamicHeaders)
+	log.Info("allowed dynamic headers", "headers", string(bts_), "headers_len", len(s.allowedDynamicHeaders))
+	bts_, _ = json.Marshal(r.Header)
+	log.Info("request headers", "headers", string(bts_), "headers_len", len(r.Header))
+	if len(s.allowedDynamicHeaders) > 0 {
+		filteredHeaderValues := make(map[string][]string)
+		for _, h := range s.allowedDynamicHeaders {
+			values := r.Header.Values(h)
+			if len(values) > 0 {
+				filteredHeaderValues[h] = values
+			}
+		}
+		if len(filteredHeaderValues) > 0 {
+			log.Info("proxying dynamic headers")
+			ctx = context.WithValue(ctx, ContextKeyHeadersToForward, filteredHeaderValues) // nolint:staticcheck
+		}
+
 	}
 
 	return context.WithValue(
@@ -961,6 +1030,14 @@ func GetXForwardedFor(ctx context.Context) string {
 	return xff
 }
 
+func GetHeadersToForward(ctx context.Context) map[string][]string {
+	headers, ok := ctx.Value(ContextKeyHeadersToForward).(map[string][]string)
+	if !ok {
+		return nil
+	}
+	return headers
+}
+
 type recordLenWriter struct {
 	io.Writer
 	Len int
@@ -1005,4 +1082,55 @@ func createBatchRequest(elems []batchElem) []*RPCReq {
 		batch[i] = elems[i].Req
 	}
 	return batch
+}
+
+// VerifyFlashbotsAuth takes a X-Flashbots-Signature header and a body and verifies that the signature is valid for the body.
+// It returns the signing address if the signature is valid or an error if the signature is invalid.
+func VerifyFlashbotsAuth(header string, body []byte) (common.Address, error) {
+	if header == "" {
+		return common.Address{}, ErrNoSignature
+	}
+
+	parsedSignerStr, parsedSignatureStr, found := strings.Cut(header, ":")
+	if !found {
+		return common.Address{}, fmt.Errorf("%w: missing separator", ErrInvalidSignature)
+	}
+
+	parsedSignature, err := hexutil.Decode(parsedSignatureStr)
+	if err != nil || len(parsedSignature) == 0 {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+	}
+
+	if parsedSignature[len(parsedSignature)-1] >= 27 {
+		parsedSignature[len(parsedSignature)-1] -= 27
+	}
+	if parsedSignature[len(parsedSignature)-1] > 1 {
+		return common.Address{}, fmt.Errorf("%w: invalid recovery id", ErrInvalidSignature)
+	}
+
+	hashedBody := crypto.Keccak256Hash(body).Hex()
+	messageHash := accounts.TextHash([]byte(hashedBody))
+	recoveredPublicKeyBytes, err := crypto.Ecrecover(messageHash, parsedSignature)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+	}
+
+	recoveredPublicKey, err := crypto.UnmarshalPubkey(recoveredPublicKeyBytes)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+	}
+	recoveredSigner := crypto.PubkeyToAddress(*recoveredPublicKey)
+
+	// case-insensitive equality check
+	parsedSigner := common.HexToAddress(parsedSignerStr)
+	if recoveredSigner.Cmp(parsedSigner) != 0 {
+		return common.Address{}, fmt.Errorf("%w: signing address mismatch", ErrInvalidSignature)
+	}
+
+	signatureNoRecoverID := parsedSignature[:len(parsedSignature)-1] // remove recovery id
+	if !crypto.VerifySignature(recoveredPublicKeyBytes, messageHash, signatureNoRecoverID) {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+	}
+
+	return recoveredSigner, nil
 }
