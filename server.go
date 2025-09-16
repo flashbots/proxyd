@@ -691,7 +691,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				log.Error(
 					"error forwarding RPC batch",
 					"batch_size", len(elems),
-					"backend_group", group,
+					"backend_group", group.backendGroup,
 					"req_id", GetReqID(ctx),
 					"err", err,
 				)
@@ -795,10 +795,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 
-	bts_, _ := json.Marshal(s.allowedDynamicHeaders)
-	log.Info("allowed dynamic headers", "headers", string(bts_), "headers_len", len(s.allowedDynamicHeaders))
-	bts_, _ = json.Marshal(r.Header)
-	log.Info("request headers", "headers", string(bts_), "headers_len", len(r.Header))
 	if len(s.allowedDynamicHeaders) > 0 {
 		filteredHeaderValues := make(map[string][]string)
 		for _, h := range s.allowedDynamicHeaders {
