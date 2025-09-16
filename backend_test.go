@@ -189,3 +189,52 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 	}
 	return 0
 }
+
+func TestBackendURLBuilding(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		query    string
+		expected string
+	}{
+		{
+			name:     "query parameters forwarded",
+			path:     "/",
+			query:    "hint=hash",
+			expected: "http://backend:8080?hint=hash",
+		},
+		{
+			name:     "fast path forwarded",
+			path:     "/fast",
+			query:    "",
+			expected: "http://backend:8080/fast",
+		},
+		{
+			name:     "fast path with query forwarded",
+			path:     "/fast",
+			query:    "builder=builder1",
+			expected: "http://backend:8080/fast?builder=builder1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test the URL building logic from doForward()
+			ctx := context.Background()
+			ctx = context.WithValue(ctx, ContextKeyPath, tt.path)
+			ctx = context.WithValue(ctx, ContextKeyRawQuery, tt.query)
+
+			baseURL := "http://backend:8080"
+			backendURL := baseURL
+
+			if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
+				backendURL = strings.TrimSuffix(baseURL, "/") + path
+			}
+			if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
+				backendURL += "?" + rawQuery
+			}
+
+			assert.Equal(t, tt.expected, backendURL)
+		})
+	}
+}

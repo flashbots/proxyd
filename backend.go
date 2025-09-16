@@ -744,7 +744,16 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		body = mustMarshalJSON(rpcReqs)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", b.rpcURL, bytes.NewReader(body))
+	// Build backend URL with query parameters and path
+	backendURL := b.rpcURL
+	if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
+		backendURL = strings.TrimSuffix(b.rpcURL, "/") + path
+	}
+	if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
+		backendURL += "?" + rawQuery
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", backendURL, bytes.NewReader(body))
 	if err != nil {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
