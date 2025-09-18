@@ -193,46 +193,60 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 func TestBackendURLBuilding(t *testing.T) {
 	tests := []struct {
 		name     string
+		method   string
 		path     string
 		query    string
 		expected string
 	}{
 		{
-			name:     "query parameters forwarded",
+			name:     "eth_sendRawTransaction with query parameters",
+			method:   "eth_sendRawTransaction",
 			path:     "/",
 			query:    "hint=hash",
 			expected: "http://backend:8080?hint=hash",
 		},
 		{
-			name:     "fast path forwarded",
+			name:     "eth_sendRawTransaction with fast path",
+			method:   "eth_sendRawTransaction",
 			path:     "/fast",
 			query:    "",
 			expected: "http://backend:8080/fast",
 		},
 		{
-			name:     "fast path with query forwarded",
+			name:     "eth_sendRawTransaction with fast path and query",
+			method:   "eth_sendRawTransaction",
 			path:     "/fast",
 			query:    "builder=builder1",
 			expected: "http://backend:8080/fast?builder=builder1",
+		},
+		{
+			name:     "other method ignores path",
+			method:   "eth_getTransactionCount",
+			path:     "/fast",
+			query:    "hint=hash",
+			expected: "http://backend:8080",
+		},
+		{
+			name:     "eth_getTransactionReceipt ignores URL params",
+			method:   "eth_getTransactionReceipt",
+			path:     "/fast",
+			query:    "builder=builder1",
+			expected: "http://backend:8080",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test the URL building logic from doForward()
+			// Test the URL building logic using the helper function
 			ctx := context.Background()
 			ctx = context.WithValue(ctx, ContextKeyPath, tt.path)
 			ctx = context.WithValue(ctx, ContextKeyRawQuery, tt.query)
 
-			baseURL := "http://backend:8080"
-			backendURL := baseURL
+			// Simulate RPCReqs
+			rpcReqs := []*RPCReq{{Method: tt.method}}
 
-			if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
-				backendURL = strings.TrimSuffix(baseURL, "/") + path
-			}
-			if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
-				backendURL += "?" + rawQuery
-			}
+			baseURL := "http://backend:8080"
+			backendURL := buildBackendURL(baseURL, rpcReqs, ctx)
 
 			assert.Equal(t, tt.expected, backendURL)
 		})
