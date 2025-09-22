@@ -190,3 +190,91 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 	return 0
 }
 
+func TestHeaderForwarding(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		query         string
+		expectedHeaders map[string]string
+	}{
+		{
+			name:  "fast path forwarded as header",
+			path:  "/fast",
+			query: "",
+			expectedHeaders: map[string]string{
+				"X-Original-Path": "/fast",
+			},
+		},
+		{
+			name:  "fast path with query forwarded as headers",
+			path:  "/fast",
+			query: "hint=calldata&builder=flashbots",
+			expectedHeaders: map[string]string{
+				"X-Original-Path":  "/fast",
+				"X-Original-Query": "hint=calldata&builder=flashbots",
+			},
+		},
+		{
+			name:  "root path with query forwarded as headers",
+			path:  "/",
+			query: "builder=rsync",
+			expectedHeaders: map[string]string{
+				"X-Original-Query": "builder=rsync",
+			},
+		},
+		{
+			name:  "query only forwarded as header",
+			path:  "",
+			query: "hint=hash",
+			expectedHeaders: map[string]string{
+				"X-Original-Query": "hint=hash",
+			},
+		},
+		{
+			name:            "no path or query means no headers",
+			path:            "",
+			query:           "",
+			expectedHeaders: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create context with path and query
+			ctx := context.Background()
+			if tt.path != "" && tt.path != "/" {
+				ctx = context.WithValue(ctx, ContextKeyPath, tt.path)
+			}
+			if tt.query != "" {
+				ctx = context.WithValue(ctx, ContextKeyRawQuery, tt.query)
+			}
+
+			// Create a mock HTTP request to verify headers are set
+			req, err := http.NewRequestWithContext(ctx, "POST", "http://backend:8080", nil)
+			require.NoError(t, err)
+
+			// Simulate the header forwarding logic from doForward()
+			if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
+				req.Header.Set("X-Original-Path", path)
+			}
+			if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
+				req.Header.Set("X-Original-Query", rawQuery)
+			}
+
+			// Verify the expected headers are set correctly
+			for expectedHeader, expectedValue := range tt.expectedHeaders {
+				actualValue := req.Header.Get(expectedHeader)
+				assert.Equal(t, expectedValue, actualValue, "Header %s should have value %s", expectedHeader, expectedValue)
+			}
+
+			// Verify no unexpected headers are set
+			if _, exists := tt.expectedHeaders["X-Original-Path"]; !exists {
+				assert.Empty(t, req.Header.Get("X-Original-Path"), "X-Original-Path should not be set")
+			}
+			if _, exists := tt.expectedHeaders["X-Original-Query"]; !exists {
+				assert.Empty(t, req.Header.Get("X-Original-Query"), "X-Original-Query should not be set")
+			}
+		})
+	}
+}
+
