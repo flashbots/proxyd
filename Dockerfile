@@ -6,7 +6,7 @@ ARG GITVERSION=docker
 
 RUN apk add make jq git gcc musl-dev linux-headers
 
-COPY ./proxyd /app
+COPY . /app
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ FROM alpine:3.20
 
 RUN apk add bind-tools jq curl bash git redis
 
-COPY ./proxyd/entrypoint.sh /bin/entrypoint.sh
+COPY ./entrypoint.sh /bin/entrypoint.sh
 
 RUN apk update && \
     apk add ca-certificates && \
