@@ -39,6 +39,8 @@ const (
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
 	ContextKeyHeadersToForward                      = "headers_to_forward"
+	ContextKeyRawQuery                              = "raw_query"
+	ContextKeyPath                                  = "path"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
 	FlashbotsAuthHeader                             = "X-Flashbots-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
@@ -254,6 +256,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
 	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
+	hdlr.HandleFunc("/fast", s.HandleRPC).Methods("POST")
 	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
@@ -778,6 +781,10 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
+
+	// Store query parameters and path for forwarding to backend
+	ctx = context.WithValue(ctx, ContextKeyRawQuery, r.URL.RawQuery) // nolint:staticcheck
+	ctx = context.WithValue(ctx, ContextKeyPath, r.URL.Path)         // nolint:staticcheck
 
 	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
 	if opTxProxyAuth != "" {
