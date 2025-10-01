@@ -755,21 +755,12 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, wrapErr(err, "error creating backend request")
 	}
 
+	// Forward all collected headers (includes URL-derived and request headers)
 	headersToForward := GetHeadersToForward(ctx)
-	if len(headersToForward) != 0 {
-		for k, v := range headersToForward {
-			for _, value := range v {
-				httpReq.Header.Add(k, value)
-			}
+	for k, v := range headersToForward {
+		for _, value := range v {
+			httpReq.Header.Add(k, value)
 		}
-	}
-
-	// Forward original URL context as headers for all methods
-	if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
-		httpReq.Header.Set("X-Original-Path", path)
-	}
-	if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
-		httpReq.Header.Set("X-Original-Query", rawQuery)
 	}
 
 	if b.authPassword != "" {
