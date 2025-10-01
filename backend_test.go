@@ -240,13 +240,19 @@ func TestHeaderForwarding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create context with path and query
+			// Create context with headers to forward (unified approach)
 			ctx := context.Background()
+			headersToForward := make(map[string][]string)
+
 			if tt.path != "" && tt.path != "/" {
-				ctx = context.WithValue(ctx, ContextKeyPath, tt.path)
+				headersToForward["X-Original-Path"] = []string{tt.path}
 			}
 			if tt.query != "" {
-				ctx = context.WithValue(ctx, ContextKeyRawQuery, tt.query)
+				headersToForward["X-Original-Query"] = []string{tt.query}
+			}
+
+			if len(headersToForward) > 0 {
+				ctx = context.WithValue(ctx, ContextKeyHeadersToForward, headersToForward)
 			}
 
 			// Create a mock HTTP request to verify headers are set
@@ -254,11 +260,11 @@ func TestHeaderForwarding(t *testing.T) {
 			require.NoError(t, err)
 
 			// Simulate the header forwarding logic from doForward()
-			if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
-				req.Header.Set("X-Original-Path", path)
-			}
-			if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
-				req.Header.Set("X-Original-Query", rawQuery)
+			headersToForwardFromCtx := GetHeadersToForward(ctx)
+			for k, v := range headersToForwardFromCtx {
+				for _, value := range v {
+					req.Header.Add(k, value)
+				}
 			}
 
 			// Verify the expected headers are set correctly

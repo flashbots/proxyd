@@ -39,8 +39,6 @@ const (
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
 	ContextKeyHeadersToForward                      = "headers_to_forward"
-	ContextKeyRawQuery                              = "raw_query"
-	ContextKeyPath                                  = "path"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
 	FlashbotsAuthHeader                             = "X-Flashbots-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
@@ -782,10 +780,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
 
-	// Store query parameters and path for forwarding to backend
-	ctx = context.WithValue(ctx, ContextKeyRawQuery, r.URL.RawQuery) // nolint:staticcheck
-	ctx = context.WithValue(ctx, ContextKeyPath, r.URL.Path)         // nolint:staticcheck
-
 	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
 	if opTxProxyAuth != "" {
 		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
@@ -802,19 +796,26 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 
-	if len(s.allowedDynamicHeaders) > 0 {
-		filteredHeaderValues := make(map[string][]string)
-		for _, h := range s.allowedDynamicHeaders {
-			values := r.Header.Values(h)
-			if len(values) > 0 {
-				filteredHeaderValues[h] = values
-			}
-		}
-		if len(filteredHeaderValues) > 0 {
-			log.Info("proxying dynamic headers")
-			ctx = context.WithValue(ctx, ContextKeyHeadersToForward, filteredHeaderValues) // nolint:staticcheck
-		}
+	// Collect all headers to forward to backends
+	headersToForward := make(map[string][]string)
 
+	// Always include URL context as synthetic headers
+	if r.URL.Path != "" && r.URL.Path != "/" {
+		headersToForward["X-Original-Path"] = []string{r.URL.Path}
+	}
+	if r.URL.RawQuery != "" {
+		headersToForward["X-Original-Query"] = []string{r.URL.RawQuery}
+	}
+
+	// Conditionally include allowed request headers
+	for _, h := range s.allowedDynamicHeaders {
+		if values := r.Header.Values(h); len(values) > 0 {
+			headersToForward[h] = values
+		}
+	}
+
+	if len(headersToForward) > 0 {
+		ctx = context.WithValue(ctx, ContextKeyHeadersToForward, headersToForward) // nolint:staticcheck
 	}
 
 	return context.WithValue(
