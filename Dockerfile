@@ -6,17 +6,26 @@ ARG GITVERSION=docker
 
 RUN apk add make jq git gcc musl-dev linux-headers
 
-COPY ./proxyd /app
-
 WORKDIR /app
 
-RUN make proxyd
+# Copy dependency files first for better caching
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# Copy source code
+COPY . .
+
+# Build with cache mounts for faster compilation
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make proxyd
 
 FROM alpine:3.20
 
 RUN apk add bind-tools jq curl bash git redis
 
-COPY ./proxyd/entrypoint.sh /bin/entrypoint.sh
+COPY entrypoint.sh /bin/entrypoint.sh
 
 RUN apk update && \
     apk add ca-certificates && \
