@@ -676,6 +676,24 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 	return nil
 }
 
+// buildBackendURL constructs the backend URL for forwarding requests.
+// Only eth_sendRawTransaction uses URL parameters for MEV protection configuration.
+// TODO: Remove when API gateway handles protocol translation at the boundary.
+func buildBackendURL(baseURL string, rpcReqs []*RPCReq, ctx context.Context) string {
+	backendURL := baseURL
+
+	if len(rpcReqs) > 0 && rpcReqs[0].Method == "eth_sendRawTransaction" {
+		if path, ok := ctx.Value(ContextKeyPath).(string); ok && path != "" && path != "/" {
+			backendURL = strings.TrimSuffix(baseURL, "/") + path
+		}
+		if rawQuery, ok := ctx.Value(ContextKeyRawQuery).(string); ok && rawQuery != "" {
+			backendURL += "?" + rawQuery
+		}
+	}
+
+	return backendURL
+}
+
 func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, error) {
 	// we are concerned about network error rates, so we record 1 request independently of how many are in the batch
 	b.networkRequestsSlidingWindow.Incr()
@@ -744,7 +762,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		body = mustMarshalJSON(rpcReqs)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", b.rpcURL, bytes.NewReader(body))
+	// Build backend URL
+	backendURL := buildBackendURL(b.rpcURL, rpcReqs, ctx)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", backendURL, bytes.NewReader(body))
 	if err != nil {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
