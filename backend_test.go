@@ -190,65 +190,97 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 	return 0
 }
 
-func TestBackendURLBuilding(t *testing.T) {
+func TestHeaderForwarding(t *testing.T) {
 	tests := []struct {
-		name     string
-		method   string
-		path     string
-		query    string
-		expected string
+		name          string
+		path          string
+		query         string
+		expectedHeaders map[string]string
 	}{
 		{
-			name:     "eth_sendRawTransaction with query parameters",
-			method:   "eth_sendRawTransaction",
-			path:     "/",
-			query:    "hint=hash",
-			expected: "http://backend:8080?hint=hash",
+			name:  "fast path forwarded as header",
+			path:  "/fast",
+			query: "",
+			expectedHeaders: map[string]string{
+				"X-Original-Path": "/fast",
+			},
 		},
 		{
-			name:     "eth_sendRawTransaction with fast path",
-			method:   "eth_sendRawTransaction",
-			path:     "/fast",
-			query:    "",
-			expected: "http://backend:8080/fast",
+			name:  "fast path with query forwarded as headers",
+			path:  "/fast",
+			query: "hint=calldata&builder=flashbots",
+			expectedHeaders: map[string]string{
+				"X-Original-Path":  "/fast",
+				"X-Original-Query": "hint=calldata&builder=flashbots",
+			},
 		},
 		{
-			name:     "eth_sendRawTransaction with fast path and query",
-			method:   "eth_sendRawTransaction",
-			path:     "/fast",
-			query:    "builder=builder1",
-			expected: "http://backend:8080/fast?builder=builder1",
+			name:  "root path with query forwarded as headers",
+			path:  "/",
+			query: "builder=rsync",
+			expectedHeaders: map[string]string{
+				"X-Original-Query": "builder=rsync",
+			},
 		},
 		{
-			name:     "other method ignores path",
-			method:   "eth_getTransactionCount",
-			path:     "/fast",
-			query:    "hint=hash",
-			expected: "http://backend:8080",
+			name:  "query only forwarded as header",
+			path:  "",
+			query: "hint=hash",
+			expectedHeaders: map[string]string{
+				"X-Original-Query": "hint=hash",
+			},
 		},
 		{
-			name:     "eth_getTransactionReceipt ignores URL params",
-			method:   "eth_getTransactionReceipt",
-			path:     "/fast",
-			query:    "builder=builder1",
-			expected: "http://backend:8080",
+			name:            "no path or query means no headers",
+			path:            "",
+			query:           "",
+			expectedHeaders: map[string]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test the URL building logic using the helper function
+			// Create context with headers to forward (unified approach)
 			ctx := context.Background()
-			ctx = context.WithValue(ctx, ContextKeyPath, tt.path)
-			ctx = context.WithValue(ctx, ContextKeyRawQuery, tt.query)
+			headersToForward := make(map[string][]string)
 
-			// Simulate RPCReqs
-			rpcReqs := []*RPCReq{{Method: tt.method}}
+			if tt.path != "" && tt.path != "/" {
+				headersToForward["X-Original-Path"] = []string{tt.path}
+			}
+			if tt.query != "" {
+				headersToForward["X-Original-Query"] = []string{tt.query}
+			}
 
-			baseURL := "http://backend:8080"
-			backendURL := buildBackendURL(baseURL, rpcReqs, ctx)
+			if len(headersToForward) > 0 {
+				ctx = context.WithValue(ctx, ContextKeyHeadersToForward, headersToForward)
+			}
 
-			assert.Equal(t, tt.expected, backendURL)
+			// Create a mock HTTP request to verify headers are set
+			req, err := http.NewRequestWithContext(ctx, "POST", "http://backend:8080", nil)
+			require.NoError(t, err)
+
+			// Simulate the header forwarding logic from doForward()
+			headersToForwardFromCtx := GetHeadersToForward(ctx)
+			for k, v := range headersToForwardFromCtx {
+				for _, value := range v {
+					req.Header.Add(k, value)
+				}
+			}
+
+			// Verify the expected headers are set correctly
+			for expectedHeader, expectedValue := range tt.expectedHeaders {
+				actualValue := req.Header.Get(expectedHeader)
+				assert.Equal(t, expectedValue, actualValue, "Header %s should have value %s", expectedHeader, expectedValue)
+			}
+
+			// Verify no unexpected headers are set
+			if _, exists := tt.expectedHeaders["X-Original-Path"]; !exists {
+				assert.Empty(t, req.Header.Get("X-Original-Path"), "X-Original-Path should not be set")
+			}
+			if _, exists := tt.expectedHeaders["X-Original-Query"]; !exists {
+				assert.Empty(t, req.Header.Get("X-Original-Query"), "X-Original-Query should not be set")
+			}
 		})
 	}
 }
+
