@@ -818,10 +818,18 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyHeadersToForward, headersToForward) // nolint:staticcheck
 	}
 
+	reqID := randStr(10)
+	if len(headersToForward) > 0 {
+		log.Info("forwarding request with headers",
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"req_id", reqID)
+	}
+
 	return context.WithValue(
 		ctx,
 		ContextKeyReqID, // nolint:staticcheck
-		randStr(10),
+		reqID,
 	)
 }
 
