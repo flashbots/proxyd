@@ -255,9 +255,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
-	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
-	hdlr.HandleFunc("/fast", s.HandleRPC).Methods("POST")
-	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
+	hdlr.HandleFunc("/{path:.*}", s.HandleRPC).Methods("POST")  // Catch all POST paths
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 	})
