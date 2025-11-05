@@ -255,7 +255,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
-	hdlr.HandleFunc("/{path:.*}", s.HandleRPC).Methods("POST")  // Catch all POST paths
+	hdlr.HandleFunc("/{path:.*}", s.HandleRPC).Methods("POST") // Catch all POST paths
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 	})
@@ -809,7 +809,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			}
 		}
 		if len(filteredHeaderValues) > 0 {
-			log.Info("proxying dynamic headers")
+			log.Debug("proxying dynamic headers")
 			ctx = context.WithValue(ctx, ContextKeyHeadersToForward, filteredHeaderValues) // nolint:staticcheck
 		}
 
