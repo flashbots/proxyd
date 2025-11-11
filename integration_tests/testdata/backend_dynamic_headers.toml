@@ -1,0 +1,29 @@
+verify_flashbots_signature = true
+
+[server]
+rpc_port = 8545
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.upstream]
+rpc_url = "$UPSTREAM_RPC_URL"
+ws_url = "$UPSTREAM_RPC_URL"
+allowed_dynamic_headers = []
+
+[backends.control]
+rpc_url = "$CONTROL_RPC_URL"
+ws_url = "$CONTROL_RPC_URL"
+allowed_dynamic_headers = ["x-flashbots-signature"]
+
+[backend_groups]
+[backend_groups.upstream]
+backends = ["upstream"]
+
+[backend_groups.control]
+backends = ["control"]
+
+[rpc_method_mappings]
+eth_chainId = "upstream"
+net_version = "control"

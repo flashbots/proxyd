@@ -112,6 +112,13 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
+	globalDynamicHeaders := make([]string, len(config.AllowedDynamicHeaders))
+	copy(globalDynamicHeaders, config.AllowedDynamicHeaders)
+	allowedDynamicHeaderSet := make(map[string]struct{}, len(globalDynamicHeaders))
+	for _, header := range globalDynamicHeaders {
+		allowedDynamicHeaderSet[header] = struct{}{}
+	}
+
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
 	var rpcRequestSemaphore *semaphore.Weighted
 	if config.Server.DisableConcurrentRequestSemaphore {
@@ -203,6 +210,13 @@ func Start(config *Config) (*Server, func(), error) {
 		if cfg.StripTrailingXFF {
 			opts = append(opts, WithStrippedTrailingXFF())
 		}
+		var forwardHeaders []string
+		if len(cfg.AllowedDynamicHeaders) != 0 {
+			forwardHeaders = append([]string(nil), cfg.AllowedDynamicHeaders...)
+			for _, header := range forwardHeaders {
+				allowedDynamicHeaderSet[header] = struct{}{}
+			}
+		}
 		if cfg.ResponseTimeoutMilliseconds != 0 {
 			opts = append(opts, WithTimeout(millisecondsToDuration(cfg.ResponseTimeoutMilliseconds)))
 		}
@@ -228,6 +242,9 @@ func Start(config *Config) (*Server, func(), error) {
 		opts = append(opts, WithConsensusReceiptTarget(receiptsTarget))
 
 		back := NewBackend(name, rpcURL, wsURL, rpcRequestSemaphore, opts...)
+		if len(forwardHeaders) != 0 {
+			back.forwardRequestHeaders = forwardHeaders
+		}
 		backendNames = append(backendNames, name)
 		backendsByName[name] = back
 		log.Info("configured backend",
@@ -235,6 +252,11 @@ func Start(config *Config) (*Server, func(), error) {
 			"backend_names", backendNames,
 			"rpc_url", rpcURL,
 			"ws_url", wsURL)
+	}
+
+	allowedDynamicHeaders := make([]string, 0, len(allowedDynamicHeaderSet))
+	for header := range allowedDynamicHeaderSet {
+		allowedDynamicHeaders = append(allowedDynamicHeaders, header)
 	}
 
 	if config.InteropValidationConfig.Strategy == "" {
@@ -434,7 +456,7 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
-		config.AllowedDynamicHeaders,
+		allowedDynamicHeaders,
 		config.VerifyFlashbotsSignature,
 	)
 	if err != nil {

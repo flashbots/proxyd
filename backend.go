@@ -293,22 +293,23 @@ func ErrInvalidParams(msg string) *RPCErr {
 }
 
 type Backend struct {
-	Name                 string
-	rpcURL               string
-	receiptsTarget       string
-	wsURL                string
-	authUsername         string
-	authPassword         string
-	headers              map[string]string
-	client               *LimitedHTTPClient
-	dialer               *websocket.Dialer
-	maxRetries           int
-	maxResponseSize      int64
-	maxRPS               int
-	maxWSConns           int
-	outOfServiceInterval time.Duration
-	stripTrailingXFF     bool
-	proxydIP             string
+	Name                  string
+	rpcURL                string
+	receiptsTarget        string
+	wsURL                 string
+	authUsername          string
+	authPassword          string
+	headers               map[string]string
+	client                *LimitedHTTPClient
+	dialer                *websocket.Dialer
+	maxRetries            int
+	maxResponseSize       int64
+	maxRPS                int
+	maxWSConns            int
+	outOfServiceInterval  time.Duration
+	stripTrailingXFF      bool
+	forwardRequestHeaders []string
+	proxydIP              string
 
 	skipIsSyncingCheck bool
 	skipPeerCountCheck bool
@@ -773,10 +774,14 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	}
 
 	headersToForward := GetHeadersToForward(ctx)
-	if len(headersToForward) != 0 {
-		for k, v := range headersToForward {
-			for _, value := range v {
-				httpReq.Header.Add(k, value)
+	if len(headersToForward) != 0 && b.forwardRequestHeaders != nil {
+		for _, header := range b.forwardRequestHeaders {
+			values, ok := headersToForward[header]
+			if !ok {
+				continue
+			}
+			for _, value := range values {
+				httpReq.Header.Add(header, value)
 			}
 		}
 	}
