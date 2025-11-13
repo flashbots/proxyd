@@ -99,18 +99,19 @@ type BackendOptions struct {
 }
 
 type BackendConfig struct {
-	Username         string            `toml:"username"`
-	Password         string            `toml:"password"`
-	RPCURL           string            `toml:"rpc_url"`
-	WSURL            string            `toml:"ws_url"`
-	WSPort           int               `toml:"ws_port"`
-	MaxRPS           int               `toml:"max_rps"`
-	MaxWSConns       int               `toml:"max_ws_conns"`
-	CAFile           string            `toml:"ca_file"`
-	ClientCertFile   string            `toml:"client_cert_file"`
-	ClientKeyFile    string            `toml:"client_key_file"`
-	StripTrailingXFF bool              `toml:"strip_trailing_xff"`
-	Headers          map[string]string `toml:"headers"`
+	Username              string            `toml:"username"`
+	Password              string            `toml:"password"`
+	RPCURL                string            `toml:"rpc_url"`
+	WSURL                 string            `toml:"ws_url"`
+	WSPort                int               `toml:"ws_port"`
+	MaxRPS                int               `toml:"max_rps"`
+	MaxWSConns            int               `toml:"max_ws_conns"`
+	CAFile                string            `toml:"ca_file"`
+	ClientCertFile        string            `toml:"client_cert_file"`
+	ClientKeyFile         string            `toml:"client_key_file"`
+	StripTrailingXFF      bool              `toml:"strip_trailing_xff"`
+	AllowedDynamicHeaders []string          `toml:"allowed_dynamic_headers"`
+	Headers               map[string]string `toml:"headers"`
 
 	Weight int `toml:"weight"`
 
@@ -230,7 +231,6 @@ type Config struct {
 	BackendGroups            BackendGroupsConfig     `toml:"backend_groups"`
 	RPCMethodMappings        map[string]string       `toml:"rpc_method_mappings"`
 	WSMethodWhitelist        []string                `toml:"ws_method_whitelist"`
-	AllowedDynamicHeaders    []string                `toml:"allowed_dynamic_headers"`
 	VerifyFlashbotsSignature bool                    `toml:"verify_flashbots_signature"`
 	WhitelistErrorMessage    string                  `toml:"whitelist_error_message"`
 	SenderRateLimit          SenderRateLimitConfig   `toml:"sender_rate_limit"`
