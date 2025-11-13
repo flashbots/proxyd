@@ -20,7 +20,6 @@ const testFlashbotsPrivKeyHex = "59c6995e998f97a5a0044966f0945389dc9e86dae88c6c5
 
 func TestBackendDynamicHeaders(t *testing.T) {
 
-
 	upstreamBackend := NewMockBackend(BatchedResponseHandler(200, goodResponse))
 	defer upstreamBackend.Close()
 	controlBackend := NewMockBackend(BatchedResponseHandler(200, goodResponse))

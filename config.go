@@ -231,7 +231,6 @@ type Config struct {
 	BackendGroups            BackendGroupsConfig     `toml:"backend_groups"`
 	RPCMethodMappings        map[string]string       `toml:"rpc_method_mappings"`
 	WSMethodWhitelist        []string                `toml:"ws_method_whitelist"`
-	AllowedDynamicHeaders    []string                `toml:"allowed_dynamic_headers"`
 	VerifyFlashbotsSignature bool                    `toml:"verify_flashbots_signature"`
 	WhitelistErrorMessage    string                  `toml:"whitelist_error_message"`
 	SenderRateLimit          SenderRateLimitConfig   `toml:"sender_rate_limit"`

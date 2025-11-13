@@ -774,7 +774,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	}
 
 	headersToForward := GetHeadersToForward(ctx)
-	if len(headersToForward) != 0 && b.forwardRequestHeaders != nil {
+	if len(headersToForward) != 0 {
 		for _, header := range b.forwardRequestHeaders {
 			values, ok := headersToForward[header]
 			if !ok {
