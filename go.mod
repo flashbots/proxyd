@@ -9,7 +9,7 @@ require (
 	github.com/alicebob/miniredis v2.5.0+incompatible
 	github.com/emirpasic/gods v1.18.1
 	github.com/ethereum-optimism/optimism v1.13.3-0.20250506125223-182c0424f6dc
-	github.com/ethereum/go-ethereum v1.15.3
+	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-redsync/redsync/v4 v4.10.0
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
 	github.com/gorilla/mux v1.8.0
