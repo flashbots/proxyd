@@ -112,7 +112,6 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	allowedDynamicHeaderSet := make(map[string]struct{})
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
 	var rpcRequestSemaphore *semaphore.Weighted
 	if config.Server.DisableConcurrentRequestSemaphore {
@@ -229,12 +228,6 @@ func Start(config *Config) (*Server, func(), error) {
 		opts = append(opts, WithConsensusReceiptTarget(receiptsTarget))
 
 		back := NewBackend(name, rpcURL, wsURL, rpcRequestSemaphore, opts...)
-
-		for _, header := range cfg.AllowedDynamicHeaders {
-			allowedDynamicHeaderSet[header] = struct{}{}
-		}
-		back.forwardRequestHeaders = cfg.AllowedDynamicHeaders
-
 		backendNames = append(backendNames, name)
 		backendsByName[name] = back
 		log.Info("configured backend",
@@ -242,11 +235,6 @@ func Start(config *Config) (*Server, func(), error) {
 			"backend_names", backendNames,
 			"rpc_url", rpcURL,
 			"ws_url", wsURL)
-	}
-
-	allowedDynamicHeaders := make([]string, 0, len(allowedDynamicHeaderSet))
-	for header := range allowedDynamicHeaderSet {
-		allowedDynamicHeaders = append(allowedDynamicHeaders, header)
 	}
 
 	if config.InteropValidationConfig.Strategy == "" {
@@ -446,7 +434,8 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
-		allowedDynamicHeaders,
+		config.AllowedDynamicHeaders,
+		config.HeaderTransformations,
 		config.VerifyFlashbotsSignature,
 	)
 	if err != nil {

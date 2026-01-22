@@ -41,9 +41,9 @@ const (
 	ContextKeyHeadersToForward                      = "headers_to_forward"
 	ContextKeyRawQuery                              = "raw_query"
 	ContextKeyPath                                  = "path"
-	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
-	FlashbotsAuthHeader                             = "X-Flashbots-Signature"
-	DefaultMaxBatchRPCCallsLimit                    = 100
+	DefaultOpTxProxyAuthHeader   = "X-Optimism-Signature"
+	FlashbotsAuthHeader          = "X-Flashbots-Signature"
+	DefaultMaxBatchRPCCallsLimit = 100
 	MaxBatchRPCCallsHardLimit                       = 1000
 	cacheStatusHdr                                  = "X-Proxyd-Cache-Status"
 	defaultRPCTimeout                               = 10 * time.Second
@@ -103,6 +103,7 @@ type Server struct {
 	interopValidatingConfig  InteropValidationConfig
 	interopStrategy          InteropStrategy
 	allowedDynamicHeaders    []string
+	headerTransformations    map[string]string
 	verifyFlashbotsSignature bool
 }
 
@@ -133,6 +134,7 @@ func NewServer(
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
 	allowedDynamicHeaders []string,
+	headerTransformations map[string]string,
 	verifyFlashbotsSignature bool,
 ) (*Server, error) {
 	if cache == nil {
@@ -247,6 +249,7 @@ func NewServer(
 		interopValidatingConfig:  interopValidatingConfig,
 		interopStrategy:          interopStrategy,
 		allowedDynamicHeaders:    allowedDynamicHeaders,
+		headerTransformations:    headerTransformations,
 		verifyFlashbotsSignature: verifyFlashbotsSignature,
 	}, nil
 }
@@ -255,7 +258,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
-	hdlr.HandleFunc("/{path:.*}", s.HandleRPC).Methods("POST") // Catch all POST paths
+	hdlr.HandleFunc("/{path:.*}", s.HandleRPC).Methods("POST")  // Catch all POST paths
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 	})
@@ -800,19 +803,28 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 
+	filteredHeaderValues := make(map[string][]string)
+
+	// Forward explicitly allowed headers
 	if len(s.allowedDynamicHeaders) > 0 {
-		filteredHeaderValues := make(map[string][]string)
 		for _, h := range s.allowedDynamicHeaders {
 			values := r.Header.Values(h)
 			if len(values) > 0 {
 				filteredHeaderValues[h] = values
 			}
 		}
-		if len(filteredHeaderValues) > 0 {
-			log.Debug("proxying dynamic headers")
-			ctx = context.WithValue(ctx, ContextKeyHeadersToForward, filteredHeaderValues) // nolint:staticcheck
-		}
+	}
 
+	// Transform headers based on config (e.g., User-Agent → X-Flashbots-User-Agent)
+	for srcHeader, dstHeader := range s.headerTransformations {
+		if value := r.Header.Get(srcHeader); value != "" {
+			filteredHeaderValues[dstHeader] = []string{value}
+		}
+	}
+
+	if len(filteredHeaderValues) > 0 {
+		log.Debug("proxying dynamic headers", "headers", filteredHeaderValues)
+		ctx = context.WithValue(ctx, ContextKeyHeadersToForward, filteredHeaderValues) // nolint:staticcheck
 	}
 
 	return context.WithValue(
@@ -901,15 +913,7 @@ func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transacti
 		return txpool.ErrInvalidSender
 	}
 
-	var signer types.Signer
-	// If you pass in a zero chain ID, types.LatestSignerForChainID panics. So we need to handle that case
-	// manually.
-	if tx.ChainId().Sign() == 0 {
-		signer = new(types.HomesteadSigner)
-	} else {
-		signer = types.LatestSignerForChainID(tx.ChainId())
-	}
-
+	signer := types.LatestSignerForChainID(tx.ChainId())
 	from, err := types.Sender(signer, tx)
 	if err != nil {
 		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))

@@ -137,8 +137,9 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		}, // limiterFactory
 		InteropValidationConfig{},              // interopValidatingConfig
 		NewFirstSupervisorStrategy([]string{}), // interopStrategy
-		[]string{},
-		false,
+		[]string{},                             // allowedDynamicHeaders
+		map[string]string{},                    // headerTransformations
+		false,                                  // verifyFlashbotsSignature
 	)
 	require.NoError(t, err)
 
