@@ -109,6 +109,8 @@ func NewRedisFrontendRateLimiter(r redis.UniversalClient, dur time.Duration, max
 }
 
 func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string) (bool, error) {
+	start := time.Now()
+
 	var incr *redis.IntCmd
 	truncTS := truncateNow(r.dur)
 	fullKey := fmt.Sprintf("rate_limit:%s:%s:%d", r.prefix, key, truncTS)
@@ -121,6 +123,8 @@ func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string) (bool, 
 		frontendRateLimitTakeErrors.Inc()
 		return false, err
 	}
+
+	redisFrontendRateLimiterCacheDurationSumm.WithLabelValues("TAKE").Observe(float64(time.Since(start).Milliseconds()))
 
 	return incr.Val()-1 < int64(r.max), nil
 }

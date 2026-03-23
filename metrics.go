@@ -235,6 +235,13 @@ var (
 		Buckets:   MillisecondDurationBuckets,
 	}, []string{"command"})
 
+	redisFrontendRateLimiterCacheDurationSumm = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "redis_frontend_rate_limiter_cache_duration_milliseconds",
+		Help:      "Histogram of Redis Frontend Rate limiter durations, in milliseconds.",
+		Buckets:   MillisecondDurationBuckets,
+	}, []string{"command"})
+
 	tooManyRequestErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "too_many_request_errors_total",
