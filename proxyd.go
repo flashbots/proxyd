@@ -357,18 +357,23 @@ func Start(config *Config) (*Server, func(), error) {
 		rpcCache RPCCache
 	)
 	if config.Cache.Enabled {
-		if redisClient == nil {
-			log.Warn("redis is not configured, using in-memory cache")
+		if config.Cache.UseInmemCache {
+			// enforce inmem cache for staticHandler methods
 			cache = newMemoryCache()
 		} else {
-			ttl := defaultCacheTtl
-			if config.Cache.TTL != 0 {
-				ttl = time.Duration(config.Cache.TTL)
-			}
-			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
+			if redisClient == nil {
+				log.Warn("redis is not configured, using in-memory cache")
+				cache = newMemoryCache()
+			} else {
+				ttl := defaultCacheTtl
+				if config.Cache.TTL != 0 {
+					ttl = time.Duration(config.Cache.TTL)
+				}
+				cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
 
-			if config.Redis.FallbackToMemory {
-				cache = newFallbackCache(cache, newMemoryCache())
+				if config.Redis.FallbackToMemory {
+					cache = newFallbackCache(cache, newMemoryCache())
+				}
 			}
 		}
 		rpcCache = newRPCCache(newCacheWithCompression(cache))
