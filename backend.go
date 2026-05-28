@@ -1621,9 +1621,13 @@ func (b *Backend) ClearSlidingWindows() {
 	b.networkRequestsSlidingWindow.Clear()
 }
 
+// stripXFF returns the rightmost entry in an X-Forwarded-For header.
+//
+// AWS ALB runs in "append" mode by default, so the rightmost entry is the
+// IP it observed and the one we should use as the source of truth.
 func stripXFF(xff string) string {
 	ipList := strings.Split(xff, ",")
-	return strings.TrimSpace(ipList[0])
+	return strings.TrimSpace(ipList[len(ipList)-1])
 }
 
 type BackendGroupRPCResponse struct {
